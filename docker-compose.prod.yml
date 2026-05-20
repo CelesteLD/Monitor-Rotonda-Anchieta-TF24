@@ -6,6 +6,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: rotonda_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB:       ${POSTGRES_DB:-rotonda}
       POSTGRES_USER:     ${POSTGRES_USER:-rotonda}
@@ -31,23 +32,24 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: rotonda_backend
+    restart: unless-stopped
     environment:
       DATABASE_URL:     postgresql://${POSTGRES_USER:-rotonda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rotonda}
       SPARK_HOST:       spark
       SPARK_PORT:       9999
       CAM_URL:          https://cic.tenerife.es/e-Traffic3/data/camara-2701002-517.jpg
       CAM_REFERER:      https://cic.tenerife.es/web3/camaras_def/cam_web_2701002_517_def.html
-      FETCH_INTERVAL:   ${FETCH_INTERVAL:-60}   # más lento que en local para ahorrar CPU
+      FETCH_INTERVAL:   ${FETCH_INTERVAL:-60}
       TELEGRAM_TOKEN:   ${TELEGRAM_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      OMP_NUM_THREADS:  2                        # limitar OpenMP en VM
+      OMP_NUM_THREADS:  2
       ROI_COUNTER_BIN:  /app/cpp/roi_counter
     volumes:
       - ./backend:/app
       - /app/cpp
       - frames_data:/app/frames
       - ./backend/models:/app/models
-      - model_cache:/app/model_cache             # caché de descarga de YOLO
+      - model_cache:/app/model_cache
     ports:
       - "5000:5000"
       - "9999:9999"
@@ -65,6 +67,7 @@ services:
       context: ./spark
       dockerfile: Dockerfile
     container_name: rotonda_spark
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rotonda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rotonda}
     volumes:
@@ -94,6 +97,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: rotonda_frontend
+    restart: unless-stopped
     volumes:
       - ./frontend:/app
       - /app/node_modules
