@@ -44,6 +44,7 @@ services:
       ROI_COUNTER_BIN:  /app/cpp/roi_counter
     volumes:
       - ./backend:/app
+      - /app/cpp
       - frames_data:/app/frames
       - ./backend/models:/app/models
       - model_cache:/app/model_cache             # caché de descarga de YOLO
