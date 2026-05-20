@@ -1,0 +1,90 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: rotonda_postgres
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-rotonda}
+      POSTGRES_USER:     ${POSTGRES_USER:-rotonda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rotonda}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rotonda_backend
+    environment:
+      DATABASE_URL:     postgresql://${POSTGRES_USER:-rotonda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rotonda}
+      SPARK_HOST:       spark
+      SPARK_PORT:       9999
+      CAM_URL:          https://cic.tenerife.es/e-Traffic3/data/camara-2701002-517.jpg
+      CAM_REFERER:      https://cic.tenerife.es/web3/camaras_def/cam_web_2701002_517_def.html
+      FETCH_INTERVAL:   ${FETCH_INTERVAL:-45}
+      TELEGRAM_TOKEN:   ${TELEGRAM_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ./backend:/app
+      - frames_data:/app/frames
+      - ./backend/models:/app/models
+      - ./dataset:/data/dataset
+    ports:
+      - "5000:5000"
+      - "9999:9999"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  spark:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: rotonda_spark
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rotonda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rotonda}
+    volumes:
+      - ./spark:/opt/spark_jobs
+      - ./dataset:/data/dataset:ro
+      - ./backend/models:/data/models
+    ports:
+      - "4040:4040"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[*]
+      /opt/spark_jobs/streaming_job.py
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rotonda_frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  frames_data:

@@ -1,0 +1,112 @@
+# docker-compose.prod.yml — Despliegue en VM IaaS ULL (sin GPU, recursos limitados)
+# Uso: docker compose -f docker-compose.prod.yml up --build
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: rotonda_postgres
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-rotonda}
+      POSTGRES_USER:     ${POSTGRES_USER:-rotonda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '1'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rotonda}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rotonda_backend
+    environment:
+      DATABASE_URL:     postgresql://${POSTGRES_USER:-rotonda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rotonda}
+      SPARK_HOST:       spark
+      SPARK_PORT:       9999
+      CAM_URL:          https://cic.tenerife.es/e-Traffic3/data/camara-2701002-517.jpg
+      CAM_REFERER:      https://cic.tenerife.es/web3/camaras_def/cam_web_2701002_517_def.html
+      FETCH_INTERVAL:   ${FETCH_INTERVAL:-60}   # más lento que en local para ahorrar CPU
+      TELEGRAM_TOKEN:   ${TELEGRAM_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      OMP_NUM_THREADS:  2                        # limitar OpenMP en VM
+      ROI_COUNTER_BIN:  /app/cpp/roi_counter
+    volumes:
+      - ./backend:/app
+      - frames_data:/app/frames
+      - ./backend/models:/app/models
+      - model_cache:/app/model_cache             # caché de descarga de YOLO
+    ports:
+      - "5000:5000"
+      - "9999:9999"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+          cpus: '3'
+
+  spark:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: rotonda_spark
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rotonda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rotonda}
+    volumes:
+      - ./spark:/opt/spark_jobs
+      - ./backend/models:/data/models
+    ports:
+      - "4040:4040"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '2'
+    command: >
+      /opt/spark/bin/spark-submit
+      --master local[2]
+      --driver-memory 1g
+      --conf spark.executor.memory=512m
+      --conf spark.sql.shuffle.partitions=2
+      --conf spark.memory.fraction=0.6
+      /opt/spark_jobs/streaming_job.py
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rotonda_frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '1'
+
+volumes:
+  postgres_data:
+  frames_data:
+  model_cache:
